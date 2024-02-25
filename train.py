@@ -11,12 +11,18 @@ import torch
 def create_model(ema=False):
     # Network definition
     net = VNet(n_channels=1, n_classes=2, normalization="batchnorm", has_dropout=True)
-    net = torch.nn.DataParallel(net, device_ids=[0, 1])
+    # net = torch.nn.DataParallel(net, device_ids=[0, 1])
     model = net.cuda()
     if ema:
         for param in model.parameters():
             param.detach_()
     return model
+
+
+def softmax_mse_loss(inputs, targets):
+    # assert input.size()==targets.size()
+    output = (inputs - targets)**2
+    return output
 
 
 class NegEntropy(object):
@@ -144,23 +150,12 @@ class Trainer:
                 normal_batch["label"],
                 normal_batch["tokens"],
             )
-            tokens_batch = tokens_batch.to("cuda")
-            cons_volume_batch, cons_label_batch = (
-                cons_batch["image"],
-                cons_batch["label"],
-            )
 
-            normal_range_x, normal_range_y, normal_range_z = (
-                normal_batch["x_range"],
-                normal_batch["y_range"],
-                normal_batch["z_range"],
+            volume_batch, label_batch, tokens_batch = (
+                volume_batch.cuda(),
+                label_batch.cuda(),
+                tokens_batch.to("cuda"),
             )
-            cons_range_x, cons_range_y, cons_range_z = (
-                cons_batch["x_range"],
-                cons_batch["y_range"],
-                cons_batch["z_range"],
-            )
-            volume_batch, label_batch = volume_batch.cuda(), label_batch.cuda()
 
             gt_ratio = torch.sum(label_batch == 0) / len(torch.ravel(label_batch))
 
@@ -185,24 +180,10 @@ class Trainer:
                 outputs_soft[: self.labeled_num, 1, :, :, :],
                 label_batch[: self.labeled_num] == 1,
             ).mean()
-            loss1_sup = 0.5 * (sup_ce_loss1 + sup_dice_loss1)
+            loss1_sup =  (sup_ce_loss1 + sup_dice_loss1) * 0.5 
+
             
-            ####################################### Dice Loss ####################################### 
-            v_outputs_soft2 = F.softmax(sup_outputs1, dim=1)
-            r_outputs_soft2 = F.softmax(sup_outputs2, dim=1)
-            # Dice loss
-            v_predict = torch.max(v_outputs_soft2[:self.labeled_num, :, :, :, :], 1, )[1]
-            r_predict = torch.max(r_outputs_soft2[:self.labeled_num, :, :, :, :], 1, )[1]
-            diff_mask = ((v_predict == 1) ^ (r_predict == 1)).to(torch.int32)
-            v_mse_dist = softmax_mse_loss(v_outputs_soft2[:self.labeled_num, 1, :, :, :], label_batch[:self.labeled_num] ).mean()
-            r_mse_dist = softmax_mse_loss(r_outputs_soft2[:self.labeled_num, 1, :, :, :], label_batch[:self.labeled_num] ).mean()
-            v_mse      = torch.sum(diff_mask * v_mse_dist) / (torch.sum(diff_mask) + 1e-16)
-            r_mse      = torch.sum(diff_mask * r_mse_dist) / (torch.sum(diff_mask) + 1e-16)
-            
-            loss1_sup = 0.5 * (sup_ce_loss1 + sup_dice_loss1) + 0.2 * v_mse
-            loss2_sup = 0.5 * (sup_ce_loss2 + sup_dice_loss2) + 0.2 * r_mse
-            #######################################  ################################################
-            
+
             """ unsupervised part """
             # pseudo-label
             with torch.no_grad():
@@ -236,23 +217,35 @@ class Trainer:
                 outputs_soft[: self.labeled_num, 1, :, :, :],
                 label_batch[: self.labeled_num] == 1,
             ).mean()
-            loss2_sup = 0.5 * (sup_ce_loss2 + sup_dice_loss2)
-            
-            ####################################### Dice Loss ####################################### 
+            loss2_sup =  (sup_ce_loss2 + sup_dice_loss2) * 0.5 
+
+            ####################################### Dice Loss #######################################
             v_outputs_soft2 = F.softmax(sup_outputs1, dim=1)
             r_outputs_soft2 = F.softmax(sup_outputs2, dim=1)
             # Dice loss
-            v_predict = torch.max(v_outputs_soft2[:self.labeled_num, :, :, :, :], 1, )[1]
-            r_predict = torch.max(r_outputs_soft2[:self.labeled_num, :, :, :, :], 1, )[1]
+            v_predict = torch.max(
+                v_outputs_soft2[: self.labeled_num, :, :, :, :],
+                1,
+            )[1]
+            r_predict = torch.max(
+                r_outputs_soft2[: self.labeled_num, :, :, :, :],
+                1,
+            )[1]
             diff_mask = ((v_predict == 1) ^ (r_predict == 1)).to(torch.int32)
-            v_mse_dist = softmax_mse_loss(v_outputs_soft2[:self.labeled_num, 1, :, :, :], label_batch[:self.labeled_num] ).mean()
-            r_mse_dist = softmax_mse_loss(r_outputs_soft2[:self.labeled_num, 1, :, :, :], label_batch[:self.labeled_num] ).mean()
-            v_mse      = torch.sum(diff_mask * v_mse_dist) / (torch.sum(diff_mask) + 1e-16)
-            r_mse      = torch.sum(diff_mask * r_mse_dist) / (torch.sum(diff_mask) + 1e-16)
-            
-            loss1_sup = 0.5 * (sup_ce_loss1 + sup_dice_loss1) + 0.2 * v_mse
-            loss2_sup = 0.5 * (sup_ce_loss2 + sup_dice_loss2) + 0.2 * r_mse
-            #######################################  ################################################ 
+            v_mse_dist = softmax_mse_loss(
+                v_outputs_soft2[: self.labeled_num, 1, :, :, :],
+                label_batch[: self.labeled_num],
+            ).mean()
+            r_mse_dist = softmax_mse_loss(
+                r_outputs_soft2[: self.labeled_num, 1, :, :, :],
+                label_batch[: self.labeled_num],
+            ).mean()
+            v_mse = torch.sum(diff_mask * v_mse_dist) / (torch.sum(diff_mask) + 1e-16)
+            r_mse = torch.sum(diff_mask * r_mse_dist) / (torch.sum(diff_mask) + 1e-16)
+
+            loss1_sup = (sup_ce_loss1 + sup_dice_loss1) + 0.2 * v_mse * 0.5 
+            loss2_sup = (sup_ce_loss2 + sup_dice_loss2) + 0.2 * r_mse * 0.5 
+            #######################################  ################################################
 
             """ unsupervised part """
             # pseudo-label

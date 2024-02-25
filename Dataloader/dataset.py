@@ -47,7 +47,7 @@ class LAHeartDataset(Dataset):
         )
         self.testing_transform = transforms.Compose([Normalise()])
 
-        file_path = self._base_dir + f"/promt/{split}.csv"
+        file_path = self._base_dir + f"/prompt/{split}.csv"
         df = pd.read_csv(file_path, names=["key", "value"])
         self.mapping_dict = dict(zip(df["key"], df["value"]))
 

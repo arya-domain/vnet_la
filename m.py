@@ -1,7 +1,7 @@
 import os
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
 from Utils.tensor_board import Tensorboard
 import os
@@ -65,11 +65,11 @@ def main(args):
 
     logger = logging.getLogger("VNET_LA")
     logger.propagate = False
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-        filename=f"scores_output/app_{current_time}.log",
-    )
+    # logging.basicConfig(
+    #     level=logging.INFO,
+    #     format="%(asctime)s - %(levelname)s - %(message)s",
+    #     filename=f"scores_output/app_{current_time}.log",
+    # )
     file_handler = logging.FileHandler(f"scores_output/app_{current_time}.log")
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(
@@ -115,8 +115,8 @@ if __name__ == "__main__":
     cmd_line_var = CmdLineVar()
     cmd_line_var.architecture = "vnet"
     cmd_line_var.backbone = None
-    cmd_line_var.unsup_weight = 1
-    cmd_line_var.labeled_num = 16
+    cmd_line_var.unsup_weight = 0.3
+    cmd_line_var.labeled_num = 8
     cmd_line_var.max_iterations = 15000
 
     torch.backends.cudnn.benchmark = True
